@@ -1,0 +1,5 @@
+custom_profile/
+node_modules/
+Resource-Override-Chrome/
+storageState.json
+backup2.js
