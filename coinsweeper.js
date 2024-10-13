@@ -91,15 +91,15 @@ class MineswepperSolver {
 
         // Check for game end and update board state after each click
         const gameStatus = await this.checkGameEnd();
-        await this.updateBoardState();
-        this.printBoard();
-
-        if (gameStatus !== 'ongoing') {
+        if (gameStatus === 'ongoing') {
+            await this.updateBoardState();
+            this.printBoard();
+            return false;
+        } else {
             console.log(`Game ${gameStatus}!`);
             await this.handleGameEnd(gameStatus);
             return true;
         }
-        return false;
     }
 
     async getCellsFromPage() {
@@ -159,9 +159,15 @@ class MineswepperSolver {
                 this.detectAndFlagBombs();
                 let safeCells = this.findSafeCells();
 
+                // Check for game end after flagging bombs
+                gameEnded = await this.checkAndHandleGameEnd();
+                if (gameEnded) continue;
+
                 if (safeCells.length === 0) {
                     const fiftyFiftyCells = this.find5050Cells();
-                    if (fiftyFiftyCells.length === 0) {
+                    const unopenedCount = this.countUnopenedCells();
+
+                    if (fiftyFiftyCells.length === 0 && unopenedCount > 1) {
                         console.log('No safe cells or 50-50 cells found. Resetting the game.');
                         if (await this.resetGame()) {
                             break;
@@ -170,34 +176,70 @@ class MineswepperSolver {
                             return;
                         }
                     }
-                    safeCells = [fiftyFiftyCells[0]];
-                    console.log(`No safe cells found. Choosing 50-50 cell at (${safeCells[0][0]}, ${safeCells[0][1]})`);
 
-                    // Open the 50-50 cell
-                    gameEnded = await this.openCell(safeCells[0][0], safeCells[0][1]);
+                    // If there's only one unopened cell or we have 50-50 cells, make a guess
+                    if (unopenedCount === 1 || fiftyFiftyCells.length > 0) {
+                        const cellToOpen = unopenedCount === 1 ? this.findLastUnopenedCell() : fiftyFiftyCells[0];
+                        console.log(`Making a guess at cell (${cellToOpen[0]}, ${cellToOpen[1]})`);
 
-                    // Pause for 3 seconds and check for game end
-                    await this.iframe.waitForTimeout(3000);
-                    const gameStatus = await this.checkGameEnd();
-                    if (gameStatus !== 'ongoing') {
-                        console.log(`Game ${gameStatus} after 50-50 cell. Resetting...`);
-                        await this.handleGameEnd(gameStatus);
-                        gameEnded = true;
-                        continue;
+                        gameEnded = await this.openCell(cellToOpen[0], cellToOpen[1]);
+
+                        // Check for game end after guessing
+                        if (!gameEnded) {
+                            gameEnded = await this.checkAndHandleGameEnd();
+                        }
                     }
                 } else {
                     for (const [row, col] of safeCells) {
                         gameEnded = await this.openCell(row, col);
                         if (gameEnded) {
-                            console.log('Game ended. Resetting...');
+                            console.log('Game ended after opening a safe cell. Resetting...');
                             await this.resetGame();
                             break;
                         }
                         console.log(`Opened cell at (${row}, ${col})`);
+
+                        // Check for game end after each cell opening
+                        gameEnded = await this.checkAndHandleGameEnd();
+                        if (gameEnded) break;
                     }
                 }
             }
         }
+    }
+
+    async checkAndHandleGameEnd() {
+        await this.iframe.waitForTimeout(1000); // Wait for a second to allow the game to update
+        const gameStatus = await this.checkGameEnd();
+        if (gameStatus !== 'ongoing') {
+            console.log(`Game ${gameStatus}!`);
+            await this.handleGameEnd(gameStatus);
+            return true;
+        }
+        return false;
+    }
+
+    countUnopenedCells() {
+        let count = 0;
+        for (let row = 0; row < this.nrows; row++) {
+            for (let col = 0; col < this.ncols; col++) {
+                if (this.grid[row][col].status === 'unopened') {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    findLastUnopenedCell() {
+        for (let row = 0; row < this.nrows; row++) {
+            for (let col = 0; col < this.ncols; col++) {
+                if (this.grid[row][col].status === 'unopened') {
+                    return [row, col];
+                }
+            }
+        }
+        return null; // This should never happen if we've counted correctly
     }
 
     async updateBoardState() {
@@ -248,6 +290,11 @@ class MineswepperSolver {
                 }
             }
         } while (changed);
+
+        // Check if all bombs are flagged
+        if (this.bombCount === 9) {
+            console.log('All bombs flagged. Checking for game end.');
+        }
     }
 
     findSafeCells() {
