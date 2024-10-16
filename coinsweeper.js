@@ -89,6 +89,9 @@ class MineswepperSolver {
             await this.iframe.waitForTimeout(300);
         }
 
+        // Check for coin after opening a cell
+        await this.checkAndCollectCoin();
+
         // Check for game end and update board state after each click
         const gameStatus = await this.checkGameEnd();
         if (gameStatus === 'ongoing') {
@@ -199,12 +202,62 @@ class MineswepperSolver {
                         }
                         console.log(`Opened cell at (${row}, ${col})`);
 
+                        await this.checkAndCollectCoin();
+
                         // Check for game end after each cell opening
                         gameEnded = await this.checkAndHandleGameEnd();
                         if (gameEnded) break;
                     }
                 }
             }
+        }
+    }
+
+    async checkAndCollectCoin() {
+        try {
+            const coinImg = await this.iframe.$('img[alt="Bag Coin"]');
+            if (coinImg) {
+                console.log('Coin found! Attempting to collect...');
+
+                const isVisible = await coinImg.isVisible();
+                const isEnabled = await coinImg.isEnabled();
+
+                if (isVisible && isEnabled) {
+                    // Try to click the coin with a shorter timeout
+                    try {
+                        await coinImg.click({ timeout: 5000 });
+                        console.log('Coin clicked successfully!');
+                    } catch (clickError) {
+                        console.log('Failed to click coin directly. Trying alternative methods...');
+
+                        // Alternative 1: Try clicking the parent element
+                        const parent = await coinImg.$('xpath=..');
+                        if (parent) {
+                            await parent.click({ timeout: 5000 });
+                            console.log('Clicked parent element of coin.');
+                        }
+
+                        // Alternative 2: Try using JavaScript click
+                        await this.iframe.evaluate((element) => element.click(), coinImg);
+                        console.log('Attempted JavaScript click on coin.');
+                    }
+
+                    // Wait for potential animations or state changes
+                    await this.iframe.waitForTimeout(2000);
+
+                    // Verify if the coin was collected
+                    const coinStillPresent = await this.iframe.$('img[alt="Bag Coin"]');
+                    if (!coinStillPresent) {
+                        console.log('Coin successfully collected!');
+                    } else {
+                        console.log("Coin might not have been collected. It's still present on the page.");
+                    }
+                } else {
+                    console.log(`Coin found but not interactable. Visible: ${isVisible}, Enabled: ${isEnabled}`);
+                }
+            }
+        } catch (error) {
+            console.error('Error while checking for coin:', error);
         }
     }
 
